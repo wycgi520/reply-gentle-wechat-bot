@@ -43,6 +43,12 @@ app.get("/", (req, res) => {
 
 app.get("/wechat", (req, res) => {
   const { signature, timestamp, nonce, echostr } = req.query;
+
+  if (!signature && !timestamp && !nonce && !echostr) {
+    res.type("text/plain").send("WeChat message endpoint is ready.");
+    return;
+  }
+
   const verified = verifyWechatSignature({
     token: config.wechat.token,
     signature,
@@ -67,16 +73,27 @@ app.get("/wechat", (req, res) => {
 });
 
 app.post("/wechat", async (req, res) => {
+  if (isCloudPathCheck(req.body)) {
+    console.log("wechat cloud path check");
+    res.type("text/plain").send(buildSuccessReply());
+    return;
+  }
+
   const { signature, timestamp, nonce } = req.query;
-  const verified = verifyWechatSignature({
-    token: config.wechat.token,
-    signature,
-    timestamp,
-    nonce
-  });
+  const hasWechatSignature = Boolean(signature || timestamp || nonce);
+  const verified = hasWechatSignature
+    ? verifyWechatSignature({
+      token: config.wechat.token,
+      signature,
+      timestamp,
+      nonce
+    })
+    : isWechatCloudRequest(req);
 
   console.log("wechat message signature", {
     verified,
+    hasWechatSignature,
+    hasCloudHeader: isWechatCloudRequest(req),
     bodyLength: String(req.body || "").length
   });
 
@@ -142,4 +159,18 @@ function maskOpenid(openid) {
     return text;
   }
   return `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
+function isCloudPathCheck(body) {
+  return /<action>\s*CheckContainerPath\s*<\/action>/i.test(String(body || ""))
+    || /"action"\s*:\s*"CheckContainerPath"/i.test(String(body || ""));
+}
+
+function isWechatCloudRequest(req) {
+  return Boolean(
+    req.get("x-wx-source")
+    || req.get("x-wx-sources")
+    || req.get("x-wx-openid")
+    || req.get("x-wx-from-openid")
+  );
 }

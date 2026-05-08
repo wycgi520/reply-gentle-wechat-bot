@@ -65,3 +65,7 @@ test("parses adjustment and profile commands", () => {
   });
 });
 
+test("recognizes cloud path check XML shape through parser", () => {
+  const message = parseWechatXml("<xml><action>CheckContainerPath</action></xml>");
+  assert.equal(message.action, "CheckContainerPath");
+});
