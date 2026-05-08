@@ -98,6 +98,8 @@ npm run create-menu
 WECHAT_TOKEN=和公众号后台服务器配置 Token 一致
 WECHAT_APP_ID=公众号 AppID
 WECHAT_APP_SECRET=公众号 AppSecret
+WECHAT_REPLY_MODE=passive
+WECHAT_API_BASE=http://api.weixin.qq.com
 AI302_API_KEY=你的 302.AI API Key
 AI302_MODEL=deepseek-chat
 AI302_TIMEOUT_MS=4200

@@ -131,10 +131,28 @@ app.post("/wechat", async (req, res) => {
   }
 
   if (hasCloudHeader && !hasWechatSignature) {
-    res.type("text/plain").send(buildSuccessReply());
-    processCloudMessage(message).catch((error) => {
-      console.error("Failed to process cloud message:", error);
-    });
+    if (config.wechat.replyMode === "customer") {
+      res.type("text/plain").send(buildSuccessReply());
+      processCloudMessage(message).catch((error) => {
+        console.error("Failed to process cloud message:", error);
+      });
+      return;
+    }
+
+    try {
+      const startedAt = Date.now();
+      const replyText = await handleIncomingMessage(message, store);
+      console.log("wechat cloud passive reply ready", {
+        from: maskOpenid(message.FromUserName),
+        replyLength: replyText.length,
+        elapsedMs: Date.now() - startedAt,
+        responseFormat: isJsonPayload(rawBody, req) ? "json" : "xml"
+      });
+      sendCloudPassiveReply(res, message, replyText, rawBody, req);
+    } catch (error) {
+      console.error("Failed to build cloud passive reply:", error);
+      sendCloudPassiveReply(res, message, "刚刚生成失败了，可以稍后再试一次。", rawBody, req);
+    }
     return;
   }
 
@@ -226,7 +244,7 @@ async function processCloudMessage(message) {
   const startedAt = Date.now();
   const replyText = await handleIncomingMessage(message, store);
   const accessToken = await getCachedAccessToken();
-  const result = await sendCustomerTextMessage(accessToken, openid, replyText);
+  const result = await sendCustomerTextMessage(accessToken, openid, replyText, config.wechat.apiBase);
   console.log("wechat cloud customer reply sent", {
     to: maskOpenid(openid),
     replyLength: replyText.length,
@@ -244,6 +262,30 @@ async function getCachedAccessToken() {
   accessTokenCache.token = token;
   accessTokenCache.expiresAt = Date.now() + 7000 * 1000;
   return token;
+}
+
+function sendCloudPassiveReply(res, incoming, content, rawBody, req) {
+  if (isJsonPayload(rawBody, req)) {
+    res.type("application/json").send(buildJsonTextReply(incoming, content));
+    return;
+  }
+
+  res.type("application/xml").send(buildTextReply(incoming, content));
+}
+
+function buildJsonTextReply(incoming, content) {
+  return {
+    ToUserName: incoming.FromUserName || "",
+    FromUserName: incoming.ToUserName || "",
+    CreateTime: Math.floor(Date.now() / 1000),
+    MsgType: "text",
+    Content: content
+  };
+}
+
+function isJsonPayload(rawBody, req) {
+  return String(req.get("content-type") || "").includes("application/json")
+    || String(rawBody || "").trim().startsWith("{");
 }
 
 function isCloudPathCheck(body) {

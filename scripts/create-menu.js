@@ -23,7 +23,7 @@ const menu = {
 
 async function main() {
   const accessToken = await getAccessToken(config.wechat);
-  const result = await createMenu(accessToken, menu);
+  const result = await createMenu(accessToken, menu, config.wechat.apiBase);
   console.log("Menu created:", result);
 }
 
@@ -31,4 +31,3 @@ main().catch((error) => {
   console.error(error.message || error);
   process.exitCode = 1;
 });
-

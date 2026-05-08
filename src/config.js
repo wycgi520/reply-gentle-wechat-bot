@@ -12,7 +12,9 @@ export const config = {
   wechat: {
     token: process.env.WECHAT_TOKEN || "",
     appId: process.env.WECHAT_APP_ID || "",
-    appSecret: process.env.WECHAT_APP_SECRET || ""
+    appSecret: process.env.WECHAT_APP_SECRET || "",
+    replyMode: process.env.WECHAT_REPLY_MODE || "passive",
+    apiBase: process.env.WECHAT_API_BASE || "http://api.weixin.qq.com"
   },
   ai302: {
     apiKey: process.env.AI302_API_KEY || "",

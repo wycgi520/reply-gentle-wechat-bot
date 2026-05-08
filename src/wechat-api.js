@@ -1,13 +1,11 @@
-const WECHAT_API_BASE = "https://api.weixin.qq.com";
-
 export class WechatApiError extends Error {}
 
-export async function getAccessToken({ appId, appSecret }) {
+export async function getAccessToken({ appId, appSecret, apiBase = "http://api.weixin.qq.com" }) {
   if (!appId || !appSecret) {
     throw new WechatApiError("缺少 WECHAT_APP_ID 或 WECHAT_APP_SECRET。");
   }
 
-  const url = new URL("/cgi-bin/token", WECHAT_API_BASE);
+  const url = new URL("/cgi-bin/token", apiBase);
   url.searchParams.set("grant_type", "client_credential");
   url.searchParams.set("appid", appId);
   url.searchParams.set("secret", appSecret);
@@ -20,12 +18,12 @@ export async function getAccessToken({ appId, appSecret }) {
   return data.access_token;
 }
 
-export async function createMenu(accessToken, menu) {
+export async function createMenu(accessToken, menu, apiBase = "http://api.weixin.qq.com") {
   if (!accessToken) {
     throw new WechatApiError("缺少 access_token。");
   }
 
-  const url = new URL("/cgi-bin/menu/create", WECHAT_API_BASE);
+  const url = new URL("/cgi-bin/menu/create", apiBase);
   url.searchParams.set("access_token", accessToken);
 
   const data = await postJson(url, menu);
@@ -36,7 +34,7 @@ export async function createMenu(accessToken, menu) {
   return data;
 }
 
-export async function sendCustomerTextMessage(accessToken, openid, content) {
+export async function sendCustomerTextMessage(accessToken, openid, content, apiBase = "http://api.weixin.qq.com") {
   if (!accessToken) {
     throw new WechatApiError("缺少 access_token。");
   }
@@ -44,7 +42,7 @@ export async function sendCustomerTextMessage(accessToken, openid, content) {
     throw new WechatApiError("缺少 openid，无法发送客服消息。");
   }
 
-  const url = new URL("/cgi-bin/message/custom/send", WECHAT_API_BASE);
+  const url = new URL("/cgi-bin/message/custom/send", apiBase);
   url.searchParams.set("access_token", accessToken);
 
   const data = await postJson(url, {
