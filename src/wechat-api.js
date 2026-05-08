@@ -36,6 +36,32 @@ export async function createMenu(accessToken, menu) {
   return data;
 }
 
+export async function sendCustomerTextMessage(accessToken, openid, content) {
+  if (!accessToken) {
+    throw new WechatApiError("缺少 access_token。");
+  }
+  if (!openid) {
+    throw new WechatApiError("缺少 openid，无法发送客服消息。");
+  }
+
+  const url = new URL("/cgi-bin/message/custom/send", WECHAT_API_BASE);
+  url.searchParams.set("access_token", accessToken);
+
+  const data = await postJson(url, {
+    touser: openid,
+    msgtype: "text",
+    text: {
+      content
+    }
+  });
+
+  if (data.errcode && data.errcode !== 0) {
+    throw new WechatApiError(data.errmsg || `发送客服消息失败：${data.errcode}`);
+  }
+
+  return data;
+}
+
 async function getJson(url) {
   const response = await fetch(url);
   const data = await response.json();
@@ -59,4 +85,3 @@ async function postJson(url, body) {
   }
   return data;
 }
-

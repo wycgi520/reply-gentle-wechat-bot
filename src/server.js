@@ -9,10 +9,15 @@ import {
   verifyWechatSignature
 } from "./wechat.js";
 import { handleIncomingMessage } from "./dialogue.js";
+import { getAccessToken, sendCustomerTextMessage } from "./wechat-api.js";
 
 const app = express();
 const store = new UserStore(config.dataDir);
 const publicDir = path.resolve(process.cwd(), "public");
+const accessTokenCache = {
+  token: "",
+  expiresAt: 0
+};
 
 app.use(express.static(publicDir, {
   dotfiles: "ignore",
@@ -28,8 +33,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/wechat", express.text({
-  type: ["text/*", "application/xml", "application/octet-stream"],
+app.use("/wechat", express.raw({
+  type: "*/*",
   limit: "256kb"
 }));
 
@@ -73,7 +78,9 @@ app.get("/wechat", (req, res) => {
 });
 
 app.post("/wechat", async (req, res) => {
-  if (isCloudPathCheck(req.body)) {
+  const rawBody = bodyToString(req.body);
+
+  if (isCloudPathCheck(rawBody)) {
     console.log("wechat cloud path check");
     res.type("text/plain").send(buildSuccessReply());
     return;
@@ -81,6 +88,7 @@ app.post("/wechat", async (req, res) => {
 
   const { signature, timestamp, nonce } = req.query;
   const hasWechatSignature = Boolean(signature || timestamp || nonce);
+  const hasCloudHeader = isWechatCloudRequest(req);
   const verified = hasWechatSignature
     ? verifyWechatSignature({
       token: config.wechat.token,
@@ -88,13 +96,14 @@ app.post("/wechat", async (req, res) => {
       timestamp,
       nonce
     })
-    : isWechatCloudRequest(req);
+    : hasCloudHeader;
 
   console.log("wechat message signature", {
     verified,
     hasWechatSignature,
-    hasCloudHeader: isWechatCloudRequest(req),
-    bodyLength: String(req.body || "").length
+    hasCloudHeader,
+    contentType: req.get("content-type") || "",
+    bodyLength: rawBody.length
   });
 
   if (!verified) {
@@ -104,7 +113,10 @@ app.post("/wechat", async (req, res) => {
 
   let message;
   try {
-    message = parseWechatXml(req.body);
+    message = normalizeWechatMessage(parseIncomingPayload(rawBody));
+    if (hasCloudHeader && !message.FromUserName) {
+      message.FromUserName = getCloudOpenid(req);
+    }
     console.log("wechat message parsed", {
       from: maskOpenid(message.FromUserName),
       type: message.MsgType,
@@ -115,6 +127,14 @@ app.post("/wechat", async (req, res) => {
   } catch (error) {
     console.error("Failed to parse WeChat XML:", error);
     res.type("text/plain").send(buildSuccessReply());
+    return;
+  }
+
+  if (hasCloudHeader && !hasWechatSignature) {
+    res.type("text/plain").send(buildSuccessReply());
+    processCloudMessage(message).catch((error) => {
+      console.error("Failed to process cloud message:", error);
+    });
     return;
   }
 
@@ -161,6 +181,71 @@ function maskOpenid(openid) {
   return `${text.slice(0, 4)}...${text.slice(-4)}`;
 }
 
+function bodyToString(body) {
+  if (Buffer.isBuffer(body)) {
+    return body.toString("utf8");
+  }
+  return String(body || "");
+}
+
+function parseIncomingPayload(rawBody) {
+  const text = String(rawBody || "").trim();
+  if (!text) {
+    return {};
+  }
+
+  if (text.startsWith("{")) {
+    return JSON.parse(text);
+  }
+
+  return parseWechatXml(text);
+}
+
+function normalizeWechatMessage(message) {
+  return {
+    ...message,
+    ToUserName: message.ToUserName ?? message.toUserName ?? message.tousername ?? "",
+    FromUserName: message.FromUserName ?? message.fromUserName ?? message.fromusername ?? "",
+    CreateTime: message.CreateTime ?? message.createTime ?? message.createtime ?? "",
+    MsgType: message.MsgType ?? message.msgType ?? message.msgtype ?? "",
+    Content: message.Content ?? message.content ?? "",
+    Event: message.Event ?? message.event ?? "",
+    EventKey: message.EventKey ?? message.eventKey ?? message.eventkey ?? "",
+    PicUrl: message.PicUrl ?? message.picUrl ?? message.picurl ?? "",
+    MediaId: message.MediaId ?? message.mediaId ?? message.mediaid ?? ""
+  };
+}
+
+async function processCloudMessage(message) {
+  const openid = message.FromUserName || "";
+  if (!openid) {
+    console.error("Cloud message has no openid; cannot send customer service reply.", message);
+    return;
+  }
+
+  const startedAt = Date.now();
+  const replyText = await handleIncomingMessage(message, store);
+  const accessToken = await getCachedAccessToken();
+  const result = await sendCustomerTextMessage(accessToken, openid, replyText);
+  console.log("wechat cloud customer reply sent", {
+    to: maskOpenid(openid),
+    replyLength: replyText.length,
+    elapsedMs: Date.now() - startedAt,
+    result
+  });
+}
+
+async function getCachedAccessToken() {
+  if (accessTokenCache.token && Date.now() < accessTokenCache.expiresAt) {
+    return accessTokenCache.token;
+  }
+
+  const token = await getAccessToken(config.wechat);
+  accessTokenCache.token = token;
+  accessTokenCache.expiresAt = Date.now() + 7000 * 1000;
+  return token;
+}
+
 function isCloudPathCheck(body) {
   return /<action>\s*CheckContainerPath\s*<\/action>/i.test(String(body || ""))
     || /"action"\s*:\s*"CheckContainerPath"/i.test(String(body || ""));
@@ -173,4 +258,11 @@ function isWechatCloudRequest(req) {
     || req.get("x-wx-openid")
     || req.get("x-wx-from-openid")
   );
+}
+
+function getCloudOpenid(req) {
+  return req.get("x-wx-openid")
+    || req.get("x-wx-from-openid")
+    || req.get("x-wx-unionid")
+    || "";
 }
